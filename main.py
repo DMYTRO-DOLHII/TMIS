@@ -3,18 +3,16 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import random
-import skfuzzy as fuzz
-from skfuzzy import control as ctrl
 
 class TrafficSignExpertSystem:
     def __init__(self):
         self.rules = [
-            {"condition": "color == 'red' and shape == 'circle'", "action": "sign_type = 'prohibitory'"},
-            {"condition": "color == 'red' and shape == 'triangle'", "action": "sign_type = 'warning'"},
-            {"condition": "color == 'blue' and shape == 'rectangle'", "action": "sign_type = 'information'"},
-            {"condition": "shape == 'octagon'", "action": "sign_type = 'stop_sign'"},
-            {"condition": "color == 'red' and shape == 'octagon'", "action": "sign_name = 'STOP'"},
-            {"condition": "color == 'red' and shape == 'circle' and has_number == True", "action": "sign_name = 'SPEED_LIMIT'"}
+            {"condition": "color_red > 0.7 and shape_circle > 0.7", "action": "sign_type = 'prohibitory'"},
+            {"condition": "color_red > 0.7 and shape_triangle > 0.7", "action": "sign_type = 'warning'"},
+            {"condition": "color_blue > 0.7 and shape_rectangle > 0.7", "action": "sign_type = 'information'"},
+            {"condition": "shape_octagon > 0.7", "action": "sign_type = 'stop_sign'"},
+            {"condition": "has_number > 0.7", "action": "sign_name = 'SPEED_LIMIT'"},
+            {"condition": "color_red > 0.7 and shape_octagon > 0.7", "action": "sign_name = 'STOP'"}
         ]
     
     def evaluate_rule(self, condition, facts):
@@ -36,12 +34,23 @@ class TrafficSignExpertSystem:
 class SemanticNetwork:
     def __init__(self):
         self.relations = []
+        self.nodes = {
+            'stop_sign': {'type': 'sign', 'meaning': 'Повна зупинка транспорту'},
+            'speed_limit': {'type': 'sign', 'meaning': 'Обмеження максимальної швидкості'},
+            'yield_sign': {'type': 'sign', 'meaning': 'Поступитися дорогою'},
+            'prohibitory': {'type': 'category', 'description': 'Знаки заборон'},
+            'warning': {'type': 'category', 'description': 'Попереджувальні знаки'},
+            'information': {'type': 'category', 'description': 'Інформаційні знаки'}
+        }
     
     def add_relation(self, from_node, relation_type, to_node):
         self.relations.append({'from': from_node, 'relation': relation_type, 'to': to_node})
     
     def query(self, start_node, relation_type=None):
         return [rel for rel in self.relations if rel['from'] == start_node and (relation_type is None or rel['relation'] == relation_type)]
+    
+    def get_node_info(self, node_id):
+        return self.nodes.get(node_id, {})
 
 class Frame:
     def __init__(self, name, parent=None):
@@ -66,7 +75,7 @@ class TrafficSignNeuralNetwork:
         
     def generate_data(self, n_samples=1000):
         np.random.seed(42)
-        X = np.random.randn(n_samples, 5)
+        X = np.random.randn(n_samples, 7)
         y = np.zeros(n_samples)
         for i in range(n_samples):
             if X[i, 0] > 0.5 and X[i, 2] > 0:
@@ -93,146 +102,143 @@ class TrafficSignNeuralNetwork:
         features_scaled = self.scaler.transform([features])
         prediction = self.model.predict(features_scaled)[0]
         probabilities = self.model.predict_proba(features_scaled)[0]
-        class_names = ['Заборонний', 'Попереджувальний', 'Інформаційний']
+        class_names = ['prohibitory', 'warning', 'information']
         return {
             'class': class_names[int(prediction)],
-            'probabilities': {class_names[i]: f"{prob:.3f}" for i, prob in enumerate(probabilities)}
+            'probabilities': probabilities
         }
 
-class FuzzyTrafficSignSystem:
+class IntegratedTrafficSignSystem:
     def __init__(self):
-        # Створюємо нечіткі змінні
-        self.color_red = ctrl.Antecedent(np.arange(0, 1.1, 0.1), 'color_red')
-        self.shape_circle = ctrl.Antecedent(np.arange(0, 1.1, 0.1), 'shape_circle')
-        self.shape_triangle = ctrl.Antecedent(np.arange(0, 1.1, 0.1), 'shape_triangle')
-        self.sign_type = ctrl.Consequent(np.arange(0, 1.1, 0.1), 'sign_type')
+        self.expert_system = TrafficSignExpertSystem()
+        self.semantic_net = SemanticNetwork()
+        self.neural_net = TrafficSignNeuralNetwork()
+        self.frame_system = self._initialize_frames()
         
-        # Визначаємо функції належності
-        self.color_red['low'] = fuzz.trimf(self.color_red.universe, [0, 0, 0.5])
-        self.color_red['medium'] = fuzz.trimf(self.color_red.universe, [0, 0.5, 1])
-        self.color_red['high'] = fuzz.trimf(self.color_red.universe, [0.5, 1, 1])
-        
-        self.shape_circle['low'] = fuzz.trimf(self.shape_circle.universe, [0, 0, 0.5])
-        self.shape_circle['medium'] = fuzz.trimf(self.shape_circle.universe, [0, 0.5, 1])
-        self.shape_circle['high'] = fuzz.trimf(self.shape_circle.universe, [0.5, 1, 1])
-        
-        self.shape_triangle['low'] = fuzz.trimf(self.shape_triangle.universe, [0, 0, 0.5])
-        self.shape_triangle['medium'] = fuzz.trimf(self.shape_triangle.universe, [0, 0.5, 1])
-        self.shape_triangle['high'] = fuzz.trimf(self.shape_triangle.universe, [0.5, 1, 1])
-        
-        self.sign_type['prohibitory'] = fuzz.trimf(self.sign_type.universe, [0, 0, 0.5])
-        self.sign_type['warning'] = fuzz.trimf(self.sign_type.universe, [0, 0.5, 1])
-        self.sign_type['information'] = fuzz.trimf(self.sign_type.universe, [0.5, 1, 1])
-        
-        # Створюємо правила
-        rule1 = ctrl.Rule(self.color_red['high'] & self.shape_circle['high'], self.sign_type['prohibitory'])
-        rule2 = ctrl.Rule(self.color_red['high'] & self.shape_triangle['high'], self.sign_type['warning'])
-        rule3 = ctrl.Rule(self.color_red['low'] & self.shape_circle['medium'], self.sign_type['information'])
-        rule4 = ctrl.Rule(self.color_red['medium'] & self.shape_triangle['medium'], self.sign_type['warning'])
-        
-        # Створюємо систему керування
-        self.sign_ctrl = ctrl.ControlSystem([rule1, rule2, rule3, rule4])
-        self.sign_system = ctrl.ControlSystemSimulation(self.sign_ctrl)
+        self._initialize_semantic_network()
+        self.neural_net.train()
     
-    def classify(self, color_red, shape_circle, shape_triangle):
-        self.sign_system.input['color_red'] = color_red
-        self.sign_system.input['shape_circle'] = shape_circle
-        self.sign_system.input['shape_triangle'] = shape_triangle
+    def _initialize_frames(self):
+        traffic_sign = Frame("TrafficSign")
+        traffic_sign.set_slot("призначення", "регулювання дорожнього руху")
+        traffic_sign.set_slot("розташування", "біля проїзної частини")
         
-        try:
-            self.sign_system.compute()
-            result = self.sign_system.output['sign_type']
-            
-            if result <= 0.4:
-                return 'Заборонний', result
-            elif result <= 0.7:
-                return 'Попереджувальний', result
-            else:
-                return 'Інформаційний', result
-        except:
-            return 'Невідомий', 0
-
-def demonstrate_expert_system():
-    print("1. ЕКСПЕРТНА СИСТЕМА (продукційні правила):")
-    expert = TrafficSignExpertSystem()
+        prohibitory_sign = Frame("ProhibitorySign", traffic_sign)
+        prohibitory_sign.set_slot("колір", "червоний")
+        prohibitory_sign.set_slot("дія", "заборона")
+        
+        warning_sign = Frame("WarningSign", traffic_sign)
+        warning_sign.set_slot("колір", "червоний")
+        warning_sign.set_slot("форма", "трикутник")
+        warning_sign.set_slot("дія", "попередження")
+        
+        information_sign = Frame("InformationSign", traffic_sign)
+        information_sign.set_slot("колір", "синій")
+        information_sign.set_slot("дія", "інформування")
+        
+        stop_sign = Frame("StopSign", prohibitory_sign)
+        stop_sign.set_slot("форма", "восьмикутник")
+        stop_sign.set_slot("вимога", "обов'язкова зупинка")
+        
+        speed_limit_sign = Frame("SpeedLimitSign", prohibitory_sign)
+        speed_limit_sign.set_slot("форма", "круг")
+        speed_limit_sign.set_slot("характеристика", "має числове значення")
+        
+        return {
+            'traffic_sign': traffic_sign,
+            'prohibitory': prohibitory_sign,
+            'warning': warning_sign,
+            'information': information_sign,
+            'stop': stop_sign,
+            'speed_limit': speed_limit_sign
+        }
     
-    test_facts = {'color': 'red', 'shape': 'octagon', 'has_number': False}
-    result = expert.infer(test_facts)
-    print(f"   Вхід: колір=червоний, форма=восьмикутник")
-    print(f"   Результат: {result['sign_type']} - {result['sign_name']}")
-
-def demonstrate_semantic_network():
-    print("\n2. СЕМАНТИЧНА МЕРЕЖА:")
-    semantic_net = SemanticNetwork()
-    relations = [
-        ('stop_sign', 'is_a', 'prohibitory'),
-        ('speed_limit', 'is_a', 'prohibitory'),
-        ('yield_sign', 'is_a', 'warning'),
-        ('stop_sign', 'has_color', 'red')
-    ]
+    def _initialize_semantic_network(self):
+        relations = [
+            ('stop_sign', 'is_a', 'prohibitory'),
+            ('speed_limit', 'is_a', 'prohibitory'),
+            ('yield_sign', 'is_a', 'warning'),
+            ('prohibitory', 'category_of', 'traffic_signs'),
+            ('warning', 'category_of', 'traffic_signs'),
+            ('information', 'category_of', 'traffic_signs'),
+            ('stop_sign', 'requires_action', 'full_stop'),
+            ('speed_limit', 'regulates', 'vehicle_speed'),
+            ('yield_sign', 'requires_action', 'give_way')
+        ]
+        
+        for rel in relations:
+            self.semantic_net.add_relation(*rel)
     
-    for rel in relations:
-        semantic_net.add_relation(*rel)
-
-    results = semantic_net.query('stop_sign')
-    print("   Запит зв'язків для 'stop_sign':")
-    for rel in results:
-        print(f"   {rel['from']} --{rel['relation']}--> {rel['to']}")
-
-def demonstrate_frame_system():
-    print("\n3. ФРЕЙМОВА СИСТЕМА:")
-    traffic_sign = Frame("TrafficSign")
-    traffic_sign.set_slot("призначення", "регулювання руху")
-    prohibitory_sign = Frame("ProhibitorySign", traffic_sign)
-    prohibitory_sign.set_slot("колір", "червоний")
-    stop_sign = Frame("StopSign", prohibitory_sign)
-    stop_sign.set_slot("форма", "восьмикутник")
+    def process_sign(self, features):
+        results = {}
+        
+        results['neural_network'] = self.neural_net.predict(features)
+        
+        facts = {
+            'color_red': features[0],
+            'color_blue': features[1],
+            'shape_circle': features[2],
+            'shape_triangle': features[3],
+            'shape_rectangle': features[4],
+            'shape_octagon': features[5],
+            'has_number': features[6],
+            'sign_type': None,
+            'sign_name': None
+        }
+        
+        results['expert_system'] = self.expert_system.infer(facts)
+        
+        sign_type = results['expert_system'].get('sign_type', results['neural_network']['class'])
+        results['semantic_network'] = self.semantic_net.query(sign_type)
+        
+        frame_key = 'stop' if sign_type == 'stop_sign' else sign_type
+        frame = self.frame_system.get(frame_key, self.frame_system['traffic_sign'])
+        results['frame_info'] = {
+            'призначення': frame.get_slot('призначення'),
+            'дія': frame.get_slot('дія'),
+            'колір': frame.get_slot('колір'),
+            'форма': frame.get_slot('форма')
+        }
+        
+        return results
     
-    print("   Властивості стоп-знака:")
-    print(f"   Призначення: {stop_sign.get_slot('призначення')}")
-    print(f"   Колір: {stop_sign.get_slot('колір')}")
-    print(f"   Форма: {stop_sign.get_slot('форма')}")
+    def comprehensive_analysis(self, features):
+        results = self.process_sign(features)
+        
+        analysis = {
+            'predictive_power': f"Нейронна мережа: точність {results['neural_network']['probabilities'].max():.3f}",
+            'explainability': f"Продукційні правила: {results['expert_system']}",
+            'structured_knowledge': f"Фрейми: {results['frame_info']}",
+            'semantic_relations': f"Семантична мережа: {len(results['semantic_network'])} зв'язків знайдено"
+        }
+        
+        return analysis
 
-def demonstrate_neural_network():
-    print("\n4. НЕЙРОННА МЕРЕЖА:")
-    nn = TrafficSignNeuralNetwork()
-    train_acc, test_acc = nn.train()
-    print(f"   Точність навчання: {train_acc:.3f}")
-    print(f"   Точність тесту: {test_acc:.3f}")
-
-def demonstrate_fuzzy_system():
-    print("\n5. НЕЧІТКА СИСТЕМА:")
-    fuzzy_system = FuzzyTrafficSignSystem()
+def main():
+    system = IntegratedTrafficSignSystem()
     
     test_cases = [
-        (0.9, 0.8, 0.1),  # Червоний колір, кругла форма
-        (0.8, 0.1, 0.9),  # Червоний колір, трикутна форма
-        (0.2, 0.6, 0.2),  # Синій колір, кругла форма
-        (0.5, 0.4, 0.5)   # Невизначений випадок
+        [0.9, 0.1, 0.1, 0.1, 0.1, 0.9, 0.1],
+        [0.8, 0.1, 0.8, 0.1, 0.1, 0.1, 0.8],
+        [0.1, 0.9, 0.1, 0.1, 0.8, 0.1, 0.2]
     ]
     
-    for i, (color_red, shape_circle, shape_triangle) in enumerate(test_cases, 1):
-        result, confidence = fuzzy_system.classify(color_red, shape_circle, shape_triangle)
-        print(f"   Тест {i}: колір={color_red:.1f}, круг={shape_circle:.1f}, трикутник={shape_triangle:.1f}")
-        print(f"   Результат: {result} (впевненість: {confidence:.3f})")
-
-def comparative_analysis():
-    print("\n6. ПОРІВНЯЛЬНИЙ АНАЛІЗ:")
-    print("   Нечітка система vs Продукційні правила:")
-    print("   - Нечітка система краще працює з неповними даними")
-    print("   - Нечітка система надає ступінь впевненості")
-    print("   - Продукційні правила більш зрозумілі та інтерпретовані")
-    print("   - Нечітка система краще обробляє граничні випадки")
+    for i, features in enumerate(test_cases, 1):
+        print(f"Тестовий випадок {i}:")
+        print(f"Вхідні дані: {features}")
+        
+        results = system.process_sign(features)
+        analysis = system.comprehensive_analysis(features)
+        
+        print("Результати обробки:")
+        print(f"  Нейронна мережа: {results['neural_network']['class']}")
+        print(f"  Експертна система: {results['expert_system']}")
+        print(f"  Фреймова інформація: {results['frame_info']}")
+        
+        print("Аналіз моделей:")
+        for key, value in analysis.items():
+            print(f"  {key}: {value}")
+        print()
 
 if __name__ == "__main__":
-    print("=== СИСТЕМА РОЗПІЗНАВАННЯ ДОРОЖНІХ ЗНАКІВ ===")
-    print("Демонстрація різних моделей представлення знань:\n")
-    
-    demonstrate_expert_system()
-    demonstrate_semantic_network()
-    demonstrate_frame_system()
-    demonstrate_neural_network()
-    demonstrate_fuzzy_system()
-    comparative_analysis()
-    
-    print("\n=== ДЕМОНСТРАЦІЯ ЗАВЕРШЕНА ===")
+    main()
